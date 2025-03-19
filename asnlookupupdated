@@ -1,0 +1,108 @@
+import sys
+import json
+import argparse
+import requests
+import os
+from termcolor import colored
+
+# Disable SSL warnings
+requests.packages.urllib3.disable_warnings()
+
+# RapidAPI Configuration
+API_URL = "https://asn-lookup.p.rapidapi.com/api"
+HEADERS = {
+    "x-rapidapi-host": "asn-lookup.p.rapidapi.com",
+    "x-rapidapi-key": "3b6b35ea97msh220a0d8f3a19aa0p1aedd0jsn5b4364cb7fc2"
+}
+
+def banner():
+    """Display script banner"""
+    print(r'''
+        ____ ____ _  _ _    ____ ____ _  _ _  _ ___
+        |__| [__  |\ | |    |  | |  | |_/  |  | |__]
+        |  | ___] | \| |___ |__| |__| | \_ |__| |
+                        asnlookup.com
+         Author: Yassine Aboukir (@yassineaboukir)\n''')
+
+def fetch_asn_data(asn):
+    """Fetch ASN data from RapidAPI and return parsed JSON response."""
+    try:
+        response = requests.get(f"{API_URL}?asn={asn}", headers=HEADERS, timeout=10)
+        response.raise_for_status()  # Raise an error for bad HTTP responses (4xx, 5xx)
+        return response.json()
+    except requests.exceptions.Timeout:
+        raise Exception(colored("[!] API request timed out. Try again later.", "red"))
+    except requests.exceptions.ConnectionError:
+        raise Exception(colored("[!] Failed to connect to the API. Check your internet connection.", "red"))
+    except requests.exceptions.HTTPError as e:
+        raise Exception(colored(f"[!] HTTP error: {e.response.status_code}. Possible issue with the API key or request format.", "red"))
+    except json.JSONDecodeError:
+        raise Exception(colored("[!] Failed to parse API response. API may be down or returning invalid data.", "red"))
+
+def extract_ip_data(asn_data):
+    """Extract IPv4 & IPv6 data safely from API response and handle different formats."""
+    if not isinstance(asn_data, list) or len(asn_data) == 0:
+        raise Exception(colored("[!] Unexpected API response format. No data found.", "red"))
+
+    # Extract first dictionary (assuming only one result per ASN)
+    asn_info = asn_data[0]
+
+    ipv4_data = asn_info.get("ipv4_prefix", [])
+    ipv6_data = asn_info.get("ipv6_prefix", [])
+
+    # Handle different formats (sometimes data is nested, sometimes it's a single dict)
+    if isinstance(ipv4_data, dict):  # If it's a dictionary, extract values
+        ipv4_data = list(ipv4_data.values())
+    if isinstance(ipv6_data, dict):  
+        ipv6_data = list(ipv6_data.values())
+
+    if not isinstance(ipv4_data, list) or not isinstance(ipv6_data, list):
+        raise Exception(colored("[!] Unexpected IPv4/IPv6 format. API response may have changed.", "red"))
+
+    return ipv4_data, ipv6_data
+
+def save_ip_data(asn, ipv4_list, ipv6_list):
+    """Save extracted IPs to output files."""
+    output_dir = os.path.join(os.path.dirname(__file__), "output")
+    os.makedirs(output_dir, exist_ok=True)  # Ensure output directory exists
+
+    ipv4_file = os.path.join(output_dir, f"{asn}_ipv4.txt")
+    ipv6_file = os.path.join(output_dir, f"{asn}_ipv6.txt")
+
+    # Save IPv4 addresses
+    if ipv4_list:
+        with open(ipv4_file, "w") as f:
+            f.write("\n".join(ipv4_list))
+        print(colored(f"✅ IPv4 addresses saved to {ipv4_file}", "green"))
+    else:
+        print(colored(f"⚠️ No IPv4 addresses found for ASN {asn}.", "yellow"))
+
+    # Save IPv6 addresses
+    if ipv6_list:
+        with open(ipv6_file, "w") as f:
+            f.write("\n".join(ipv6_list))
+        print(colored(f"✅ IPv6 addresses saved to {ipv6_file}", "green"))
+    else:
+        print(colored(f"⚠️ No IPv6 addresses found for ASN {asn}.", "yellow"))
+
+if __name__ == "__main__":
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="ASN Lookup Tool")
+    parser.add_argument("-a", "--asn", required=True, help="ASN number to look up")
+    args = parser.parse_args()
+
+    try:
+        banner()  # Display banner
+
+        # Fetch ASN data from API
+        asn_data = fetch_asn_data(args.asn)
+
+        # Extract IP data safely
+        ipv4_list, ipv6_list = extract_ip_data(asn_data)
+
+        # Save to files
+        save_ip_data(args.asn, ipv4_list, ipv6_list)
+
+    except Exception as e:
+        print(e)
+        sys.exit(1)
